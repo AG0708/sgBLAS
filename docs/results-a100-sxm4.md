@@ -1,119 +1,159 @@
-# Archived A100-SXM4 strict-FP32 tuning snapshot
+# A100-SXM4 strict-FP32 scorecard: v0.1.0
 
-> **Not release evidence.** These measurements were produced before the source
-> tree had an immutable Git commit, and the four sanitizer runs did not cover
-> every kernel in the final shape-dispatched portfolio. The arithmetic below is
-> reproducible from retained local logs, but the logs cannot prove that the
-> current source produced the binaries. Do not use these numbers as a resume or
-> public release claim. A fresh commit-bound run supersedes this document.
+This is the commit-bound performance and correctness record for
+[sgBLAS v0.1.0](https://github.com/AG0708/sgBLAS/releases/tag/v0.1.0).
+The fail-closed verifier accepted the complete 45-artifact evidence bundle for
+commit
+[`b26974f`](https://github.com/AG0708/sgBLAS/commit/b26974f9d25f7a904d2141b15cdde2f6663e106d).
 
-## Scope
+## Headline
 
-This result covers column-major `NN` SGEMM with FP32 inputs, FP32 FMA
-accumulation, FP32 output, `alpha=1`, and `beta=0`. It is not a TF32 or Tensor
-Core comparison.
+On one NVIDIA A100-SXM4-80GB, sgBLAS reached a six-process median of
+**17.736 TFLOP/s** at `4096x4096x4096`. Across the four declared large `NN`
+shapes, the geometric mean of the per-shape median throughput ratios was
+**94.08%** versus pedantic cuBLAS with TF32 disabled.
 
-The reported values are medians from five independent benchmark processes.
-Each process used 10 warmup launches and 100 timed launches per implementation
-on the same nonblocking CUDA stream, with `NVIDIA_TF32_OVERRIDE=0`. These are
-repeated-buffer, steady-state CUDA-event timings—not cold-cache or end-to-end
-measurements.
+This is a deliberately scoped result, not a claim of universal cuBLAS parity.
+It covers the GPU, shapes, layout, math contract, and protocol below.
 
-## Target
+## Contract and protocol
+
+- Column-major `NN` SGEMM with FP32 inputs, FP32 accumulation, FP32 output,
+  `alpha=1`, and `beta=0`
+- cuBLAS configured with `CUBLAS_COMPUTE_32F_PEDANTIC` and
+  `CUBLAS_PEDANTIC_MATH`; benchmark processes launched with
+  `NVIDIA_TF32_OVERRIDE=0`
+- Six benchmark processes per variant for the seven standard shapes, plus a
+  separate six-process set for the optional `8192` shape; each set is balanced
+  three-and-three between `sgblas-first` and `cublas-first` timing order
+- 10 warmup launches and 100 CUDA-event-timed launches per implementation;
+  the optional `8192` row uses 50 timed launches
+- One shared nonblocking stream, identical A/B data, independent C buffers,
+  and a repeated-buffer steady-state cache policy; allocation and setup are
+  outside the timed region
+- Median throughput per shape; the headline score is the geometric mean of the
+  four large-shape median ratios
+
+“Strict FP32” is project shorthand for this contract. It excludes TF32 input
+conversion, but it does not imply bitwise-identical results or an identical
+reduction order.
+
+## Target and provenance
 
 | Field | Value |
 |---|---|
 | GPU | NVIDIA A100-SXM4-80GB |
 | Compute capability | 8.0 (`sm_80`) |
+| Memory | 81,920 MiB |
 | Driver | 580.126.16 |
-| Power limit | 400 W |
-| Maximum SM clock | 1410 MHz |
-| Maximum memory clock | 1593 MHz |
-| CUDA compiler | 12.4.131 |
-| cuBLAS | 12.4.5 (`120405`) |
-| Host | Ubuntu 22.04, Linux 6.8.0-100 |
+| CUDA compiler | 12.8.93 |
+| Container OS / host kernel | Ubuntu 24.04.3 LTS / Linux 6.8.0-100 |
+| Container | `runpod/pytorch:1.0.3-cu1281-torch291-ubuntu2404` |
+| Tested commit | `b26974f9d25f7a904d2141b15cdde2f6663e106d` |
+| Campaign source snapshot digest | `7941e5af45c49a945be3b4d7450965bd1c177432c81b1584725768cc7297cf3d` |
+| Release source-tree digest | `fb1b178952819c2c19e31fc6046ce92743a58186e2146dfce87e6dd31b119921` |
+| Campaign duration | 231.684 seconds |
 
-## Winning SM80 kernel portfolio
+The evidence manifest records the resolved container digest, tool paths, OS
+digest, redacted NVIDIA system report, process list, 50 telemetry snapshots,
+146 commands, CMake configuration, compiler spill reports, tested-binary
+hashes, and source hashes before and after the run. The Git worktree was clean
+and unchanged throughout.
 
-- Main CTA tile: `128x64x32`, 256 threads, `4x8` outputs per thread
-- Thread map: 32 logical rows by 8 logical columns, giving warp-wide
-  contiguous C stores and warp-broadcast B reads
-- Two-stage A/B shared-memory pipeline using 16-byte `cp.async` copies
-- Dynamic shared memory: 49,152 bytes per CTA. The kernel requests the maximum
-  shared-memory carveout as a driver preference, not a residency guarantee; the
-  resource footprint permits at most two CTAs per SM on A100.
-- Registers: 126 per thread; register spills: zero
-- Main dispatch: aligned full tiles with `K >= 64` and at least 128 equivalent
-  `128x128` CTAs
-- Underfilled fallback: the zero-spill `128x128x32` async kernel remains faster
-  for the 1024-cubed bucket
-- General fallbacks: the 122-register synchronous kernel handles edge tiles,
-  the shared-memory kernel handles smaller shapes, and the semantic kernel
-  handles transpose modes
-
-## Five-process median
+## Six-process medians
 
 | M | N | K | sgBLAS ms | sgBLAS GFLOP/s | cuBLAS ms | cuBLAS GFLOP/s | Ratio |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| 256 | 256 | 256 | 0.024 | 1,380.6 | 0.012 | 2,745.7 | 0.502 |
-| 512 | 512 | 512 | 0.074 | 3,645.8 | 0.028 | 9,748.2 | 0.374 |
-| 1024 | 1024 | 1024 | 0.212 | 10,121.6 | 0.130 | 16,542.2 | 0.612 |
-| 2048 | 2048 | 2048 | 1.029 | 16,689.9 | 0.972 | 17,669.0 | **0.945** |
-| 4096 | 4096 | 4096 | 7.727 | **17,786.7** | 7.225 | 19,023.6 | **0.935** |
-| 4096 | 1024 | 4096 | 2.051 | 16,749.8 | 1.845 | 18,627.0 | **0.899** |
-| 1024 | 4096 | 4096 | 2.052 | 16,748.0 | 1.974 | 17,405.3 | **0.962** |
+|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 256 | 256 | 0.02439 | 1,375.8 | 0.01228 | 2,733.4 | 0.504 |
+| 512 | 512 | 512 | 0.03295 | 8,147.2 | 0.02755 | 9,744.3 | 0.836 |
+| 1024 | 1024 | 1024 | 0.14165 | 15,160.2 | 0.13013 | 16,502.7 | 0.919 |
+| **1024** | **4096** | **4096** | **2.04776** | **16,779.2** | **1.98454** | **17,313.7** | **0.969** |
+| **2048** | **2048** | **2048** | **1.01449** | **16,934.6** | **0.97242** | **17,667.1** | **0.959** |
+| **4096** | **1024** | **4096** | **2.04765** | **16,780.1** | **1.84483** | **18,624.9** | **0.901** |
+| **4096** | **4096** | **4096** | **7.74930** | **17,735.7** | **7.25373** | **18,947.4** | **0.936** |
+| 8192 | 8192 | 8192 | 62.59013 | 17,566.9 | 57.57802 | 19,096.0 | 0.920 |
 
-The geometric mean of the ratios for the final four large shapes is **0.9350**,
-up from **0.7926** for the wide async kernel and **0.6891** for the synchronous
-kernel in same-pod runs. At 4096 cubed, the five candidate runs span 17,779.9
-to 17,801.0 GFLOP/s with a 17,786.7 GFLOP/s median.
+Bold rows form the predeclared large-shape corpus. Their geometric-mean ratio
+is **0.940825**. The smaller and optional sustained-throughput rows are shown
+for completeness and are not folded into that headline.
 
 Throughput uses conventional GEMM algorithmic work, `2MNK/t`, with one FMA
 counted as two operations. NVIDIA's
 [A100 80GB datasheet](https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/a100-80gb-datasheet-update-nvidia-us-1521051-r2-web.pdf)
-specifies 19.5 TFLOP/s nominal FP32 peak for the SXM model, so 17.7867 TFLOP/s
-is 91.2% of nominal peak. The 93.5% figure
-is only the measured sgBLAS/cuBLAS ratio for this archived benchmark; it is not
-percent of peak or a universal cuBLAS comparison.
+lists 19.5 TFLOP/s nominal FP32 peak for the SXM model, so the measured
+17.736 TFLOP/s is 91.0% of nominal peak. The 94.08% headline is instead the
+measured ratio to pedantic cuBLAS on the declared four-shape corpus.
 
-The optional `8192x8192x8192` sustained-throughput case used five independent
-processes, 10 warmups, and 50 repeats. In an alternating comparison with the
-previous winner, it reached a **17,750.8 GFLOP/s** median in 61.942 ms versus
-cuBLAS at 19,153.3 GFLOP/s in 57.406 ms: **0.927** of strict-FP32 cuBLAS. The
-five sgBLAS runs ranged from 17,684.2 to 17,873.8 GFLOP/s.
+## Kernel portfolio
 
-## Optimization progression at 4096 cubed
+For calls that require a matrix product, the frozen portfolio dispatches among
+the general semantic backstop, shared-memory, register-tiled, and three SM80
+asynchronous paths: wide, medium, and small. The three asynchronous kernels use
+aligned vectorized access, CTA/register tiling, and two-stage 16-byte `cp.async`
+pipelines. Runtime guards check shape, alignment, grid limits, compute
+capability, and opt-in shared-memory support before selecting an
+architecture-specific path.
 
-| Kernel | sgBLAS GFLOP/s | cuBLAS ratio |
-|---|---:|---:|
-| One output per thread | 563.6 | 0.030 |
-| 32x32 shared-memory tile | 6,388.6 | 0.337 |
-| 128x128x8 register tile | 14,109.8 | 0.741 |
-| Vectorized 128x128x16 | 14,987.0 | 0.787 |
-| Vectorized 128x128x32 | 15,228.7 | 0.801 |
-| 128x128 SM80 two-stage `cp.async` | 16,540.7 | 0.869 |
-| 128x64 SM80 two-stage `cp.async` | **17,786.7** | **0.935** |
+The exact `512x512x512` small-kernel pocket is a useful example of why dispatch
+matters: in the same canonical campaign it reached 8,147.2 GFLOP/s versus
+3,643.5 GFLOP/s for the `wide` comparison variant, a **2.24x** improvement,
+without broadening the route to unrelated shapes. At this size the comparison
+variant dispatches its shared-memory fallback because its medium and small
+asynchronous paths are disabled.
+
+Compiler reports recorded zero spill loads and zero spill stores for every
+checked kernel.
 
 ## Correctness and diagnostics
 
-The CUDA correctness suite covers every transpose pair, padded leading
-dimensions, odd dimensions, nontrivial alpha/beta values, an alpha-zero path,
-a large `NN` case with M/N/K tails through the register kernel, a fully aligned
-`768x768x64` case that activates the wide asynchronous pipeline, and an aligned
-`1024x2048x64` case that activates the 128x64 pipeline.
+The release correctness suite passed **24/24** checked cases: 11 matrix-product
+cases and 13 quick-return/scale cases. Coverage includes all transpose pairs,
+padded leading dimensions, odd and tail dimensions, nontrivial `alpha` and
+`beta`, beta-zero NaN poisoning, null-matrix no-ops, a non-default stream, a
+skinny-tall grid-limit regression, and explicit proof of all seven required
+dispatch paths:
 
-An earlier six-case, pre-portfolio binary produced clean logs for:
+- scale
+- general
+- shared
+- register
+- wide asynchronous
+- medium asynchronous
+- small asynchronous
 
-- Compute Sanitizer `memcheck`: zero errors
-- Compute Sanitizer `racecheck`: zero errors and zero warnings
-- Compute Sanitizer `initcheck`: zero errors
-- Compute Sanitizer `synccheck`: zero errors
+The tested hybrid binary also passed all four NVIDIA Compute Sanitizer gates:
 
-Those logs do not exercise every kernel in the portfolio that produced the
-table, so they are historical diagnostics rather than evidence for the final
-dispatch. This gap is one reason the snapshot is barred from release claims.
+- `memcheck`: 0 errors
+- `racecheck`: 0 hazards, 0 errors, 0 warnings
+- `initcheck`: 0 errors
+- `synccheck`: 0 errors
 
-Nsight Compute hardware performance counters were unavailable on this RunPod
-host (`ERR_NVGPUCTRPERM`). Compiler resource reports, SASS inspection, CUDA
-events, correctness tests, and sanitizer results remain available. No profiler
-counter claim is made.
+## Public evidence
+
+The release publishes:
+
+- deterministic source and complete evidence archives;
+- all raw benchmark, build, correctness, and sanitizer logs;
+- the exact tested binaries and their hashes;
+- an evidence-verification report and release manifest;
+- an SPDX SBOM; and
+- `SHA256SUMS` covering every other release asset.
+
+Download the assets from the
+[v0.1.0 release](https://github.com/AG0708/sgBLAS/releases/tag/v0.1.0).
+The verifier can re-extract the bundle, bind it to the annotated tag, regenerate
+the canonical source archive, validate every artifact, and recompute the
+scorecard from the raw JSONL rows.
+
+## Limitations
+
+- Performance claims cover one A100-SXM4-80GB, not other NVIDIA architectures.
+- The headline covers four `NN` shapes, not transpose paths or arbitrary size
+  distributions.
+- The benchmark is same-buffer steady state, not cold-cache or end-to-end
+  application latency.
+- cuBLAS is intentionally restricted to pedantic FP32; this is not a comparison
+  against TF32 or Tensor Core modes.
+- The canonical campaign did not collect Nsight Compute hardware counters, so
+  no counter claim is made. Correctness, sanitizer, compiler-resource, timing,
+  telemetry, and tested-binary evidence are available.

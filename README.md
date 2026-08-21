@@ -1,5 +1,9 @@
 # sgBLAS
 
+[![CI](https://github.com/AG0708/sgBLAS/actions/workflows/ci.yml/badge.svg)](https://github.com/AG0708/sgBLAS/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/AG0708/sgBLAS)](https://github.com/AG0708/sgBLAS/releases/latest)
+[![License](https://img.shields.io/github/license/AG0708/sgBLAS)](LICENSE)
+
 sgBLAS is a from-scratch CUDA SGEMM project: learn the machinery behind a high-performance BLAS implementation, then push a deliberately narrow kernel family as close as practical to NVIDIA cuBLAS on the same GPU using the same declared operand, output, and accumulation precision.
 
 This is not a claim to replace all of cuBLAS. cuBLAS covers many datatypes, layouts, shapes, architectures, batched operations, and numerical modes with a large internal kernel portfolio. The first defensible goal here is much smaller:
@@ -44,18 +48,28 @@ These are project targets, not promises of universal performance. Results outsid
 
 ### Release-result status
 
-The checked-in kernel portfolio has a historical A100 tuning snapshot, but that
-run predates an immutable source commit and did not sanitize every kernel in the
-winning dispatch path. It is therefore retained only as exploratory history,
-not as a release performance claim. See
-[the archived A100 snapshot](docs/results-a100-sxm4.md) for the complete rows
-and limitations.
+On one NVIDIA A100-SXM4-80GB, the v0.1.0 kernel portfolio reached a
+six-process median of **17.736 TFLOP/s** at `4096x4096x4096`. Across the four
+declared large `NN` shapes, the geometric mean of the per-shape median
+throughput ratios was **94.08%** versus cuBLAS configured with
+`CUBLAS_COMPUTE_32F_PEDANTIC`, with TF32 disabled.
 
-The v0.1 release headline will be published only after a clean checkout of the
-exact source revision passes the numerical suite, all four Compute Sanitizer
-modes, and six balanced strict-FP32 benchmark processes. Raw logs, executable
-hashes, source digest, build configuration, and machine telemetry will ship
-with that result.
+Each scored standard-corpus process used 10 warmups and 100 CUDA-event-timed
+launches per implementation on one shared nonblocking stream under a
+same-buffer, steady-state cache policy. All 24 checked correctness cases and
+all seven required dispatch paths passed. Compute Sanitizer `memcheck`,
+`racecheck`, `initcheck`, and `synccheck` were clean.
+
+The fail-closed verifier accepted all 45 checksummed evidence artifacts bound
+to commit
+[`b26974f`](https://github.com/AG0708/sgBLAS/commit/b26974f9d25f7a904d2141b15cdde2f6663e106d).
+The [v0.1.0 release](https://github.com/AG0708/sgBLAS/releases/tag/v0.1.0)
+publishes the raw logs, tested-binary hashes, source digest, build
+configuration, machine telemetry, deterministic archives, checksums, and SPDX
+SBOM. See [the full A100 scorecard](docs/results-a100-sxm4.md).
+
+These measurements apply only to this GPU, corpus, math contract, and protocol;
+they are not a claim of universal cuBLAS parity.
 
 ## Platform reality
 

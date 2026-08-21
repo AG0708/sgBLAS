@@ -594,6 +594,27 @@ sgblasStatus_t launchProduct(sgblasOperation_t transa, sgblasOperation_t transb,
                              int lda, const float *b, int ldb, float beta,
                              float *c, int ldc, cudaStream_t stream) {
   if (transa == SGBLAS_OP_N && transb == SGBLAS_OP_N) {
+#if defined(SGBLAS_EXPERIMENTAL_SM80_ASYNC) && \
+    defined(SGBLAS_EXPERIMENTAL_SM80_SMALL)
+    if (m == 512 && n == 512 && k == 512) {
+      constexpr int kExactSmallTileRows = 64;
+      constexpr int kExactSmallTileColumns = SGBLAS_SM80_SMALL_TILE_COLUMNS;
+      const bool exact_small_full_tiles =
+          m % kExactSmallTileRows == 0 && n % kExactSmallTileColumns == 0 &&
+          k % kRegisterTileK == 0;
+      const bool exact_small_aligned =
+          (reinterpret_cast<std::uintptr_t>(a) & 0xFU) == 0U &&
+          (reinterpret_cast<std::uintptr_t>(b) & 0xFU) == 0U && lda % 4 == 0 &&
+          ldb % 4 == 0;
+      if (exact_small_full_tiles && exact_small_aligned &&
+          k >= SGBLAS_SM80_SMALL_MIN_K &&
+          fitsTiledGrid(m, n, kExactSmallTileRows, kExactSmallTileColumns) &&
+          activeDeviceSupportsAsync(kAsyncSmallSharedBytes)) {
+        return launchAsyncNnSm80Small(m, n, k, alpha, a, lda, b, ldb, beta, c,
+                                     ldc, stream);
+      }
+    }
+#endif
     if (m >= kRegisterDispatchMinimum && n >= kRegisterDispatchMinimum &&
         k >= kRegisterTileK) {
 #if defined(SGBLAS_EXPERIMENTAL_SM80_ASYNC)

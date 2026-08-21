@@ -55,6 +55,8 @@ validated sgblasSgemm
     |
     `-- NN
         |
+        +-- guarded exact 512 cubed ----> sgemmAsyncNnSmallKernel
+        |
         +-- m < 768, n < 768, or k < 32 -> sgemmSharedNnKernel
         |
         `-- otherwise
@@ -209,8 +211,8 @@ Their shared-memory stages contain dense, unpadded `A` and `B` tiles. They do
 not predicate loads or stores, which is why dispatch proves all of the
 following before entering any async family:
 
-- the operation is `NN` and passed the outer `m >= 768`, `n >= 768`, `k >= 32`
-  gate;
+- the operation is `NN` and either matches the exact guarded `512x512x512`
+  pocket or passed the outer `m >= 768`, `n >= 768`, `k >= 32` gate;
 - M, N, and K are exact multiples of that family's tile dimensions;
 - `A` and `B` base addresses are 16-byte aligned;
 - `lda` and `ldb` are multiples of four floats;
@@ -274,13 +276,17 @@ wide_ctas      = (m / 128) * (n / 128) using integer division
 
 When all three async options are enabled, the first matching branch wins:
 
-1. **Small.** At defaults: `m % 64 == 0`, `n % 32 == 0`, `k % 32 == 0`,
+1. **Exact 512-cubed small pocket.** Before the outer large-shape gate, an
+   exact `512x512x512` call selects small when its tile, alignment, grid,
+   device, shared-memory, and minimum-K guards pass. Otherwise it falls through
+   to the shared kernel.
+2. **Small.** At defaults: `m % 64 == 0`, `n % 32 == 0`, `k % 32 == 0`,
    `k >= 128`, and either `wide_ctas <= 128`, or all of
    `196 <= wide_ctas <= 256`, `m <= 2048`, and `n <= 4096`.
-2. **Medium.** `m % 128 == 0`, `n % 64 == 0`, `k % 32 == 0`, `k >= 64`, and
+3. **Medium.** `m % 128 == 0`, `n % 64 == 0`, `k % 32 == 0`, `k >= 64`, and
    `128 <= wide_ctas <= 2147483647` at defaults.
-3. **Wide.** M and N are multiples of 128 and K is a multiple of 32.
-4. **Register fallback.** Any otherwise-valid large `NN` shape, including
+4. **Wide.** M and N are multiples of 128 and K is a multiple of 32.
+5. **Register fallback.** Any otherwise-valid large `NN` shape, including
    unaligned or partial tiles.
 
 Every async branch additionally applies the common alignment, grid-fit, device,

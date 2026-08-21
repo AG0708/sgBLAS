@@ -449,6 +449,20 @@ bool run_case(const TestCase &test, sgblasHandle_t handle, cudaStream_t stream,
 
 int main() {
   try {
+#if defined(SGBLAS_TEST_FROZEN_SM80_HYBRID)
+    constexpr std::size_t kExact512SmallSharedBytes =
+        2U * (64U * 32U +
+              static_cast<std::size_t>(SGBLAS_TEST_SM80_SMALL_TILE_COLUMNS) *
+                  32U) *
+        sizeof(float);
+    const DispatchPath exact_512_expected_dispatch =
+        active_device_supports_async(kExact512SmallSharedBytes)
+            ? DispatchPath::kSmall
+            : DispatchPath::kUnknown;
+#else
+    constexpr DispatchPath exact_512_expected_dispatch =
+        DispatchPath::kUnknown;
+#endif
     const std::vector<TestCase> tests = {
         {"NN odd beta=0", SGBLAS_OP_N, SGBLAS_OP_N, 37, 29, 43, 42, 50, 41,
          1.0F, 0.0F, DispatchPath::kShared},
@@ -462,6 +476,8 @@ int main() {
          0.0F, -0.75F, DispatchPath::kScale},
         {"NN register tile tails", SGBLAS_OP_N, SGBLAS_OP_N, 769, 771, 37, 774,
          42, 775, 0.875F, -0.125F, DispatchPath::kRegister},
+        {"NN exact 512 small pocket", SGBLAS_OP_N, SGBLAS_OP_N, 512, 512, 512,
+         512, 512, 512, 0.5F, -0.25F, exact_512_expected_dispatch},
         {"NN aligned full tiles", SGBLAS_OP_N, SGBLAS_OP_N, 768, 768, 64, 768,
          64, 768, -0.625F, 0.375F, DispatchPath::kUnknown},
         {"NN medium async tile", SGBLAS_OP_N, SGBLAS_OP_N, 1024, 2048, 64,

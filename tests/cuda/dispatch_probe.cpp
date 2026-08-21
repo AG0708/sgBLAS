@@ -127,8 +127,7 @@ captureDispatch(cudaStream_t stream, const std::function<void()> &launch) {
   observation.block = parameters.blockDim;
   observation.shared_bytes = parameters.sharedMemBytes;
 
-  checkCuda(cudaGraphInstantiate(&resources.executable, resources.graph, nullptr,
-                                 nullptr, 0),
+  checkCuda(cudaGraphInstantiate(&resources.executable, resources.graph, 0ULL),
             "cudaGraphInstantiate");
   checkCuda(cudaGraphLaunch(resources.executable, stream), "cudaGraphLaunch");
   checkCuda(cudaStreamSynchronize(stream),

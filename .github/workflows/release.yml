@@ -1,0 +1,143 @@
+name: Release bundle
+
+run-name: Prepare ${{ inputs.tag }} release bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing annotated release tag
+        required: true
+        default: v0.1.0
+        type: string
+      evidence_run_id:
+        description: Same-repository workflow run that uploaded the evidence artifact
+        required: true
+        type: string
+      evidence_artifact_name:
+        description: Artifact whose root contains the runner manifest.json
+        required: true
+        default: sgblas-release-evidence
+        type: string
+      publish:
+        description: Create the GitHub release after packaging and verification
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Bind source and evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: refs/tags/${{ inputs.tag }}
+
+      - name: Download supplied evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          github-token: ${{ github.token }}
+          name: ${{ inputs.evidence_artifact_name }}
+          path: ${{ runner.temp }}/sgblas-evidence
+          run-id: ${{ inputs.evidence_run_id }}
+
+      - name: Install Syft for the SPDX SBOM
+        id: syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
+
+      - name: Package the release
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/sgblas-evidence
+          OUTPUT_DIR: ${{ runner.temp }}/sgblas-release
+          RELEASE_TAG: ${{ inputs.tag }}
+          SGBLAS_SYFT: ${{ steps.syft.outputs.cmd }}
+        run: >-
+          python3 tools/release_package.py package
+          --tag "$RELEASE_TAG"
+          --evidence-dir "$EVIDENCE_DIR"
+          --output-dir "$OUTPUT_DIR"
+          --require-sbom
+
+      - name: Verify the release bundle again
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/sgblas-release
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: >-
+          python3 tools/release_package.py verify
+          --release-dir "$OUTPUT_DIR"
+          --tag "$RELEASE_TAG"
+
+      - name: Upload reviewable release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sgblas-${{ inputs.tag }}-release
+          path: ${{ runner.temp }}/sgblas-release/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish immutable release assets
+    if: ${{ inputs.publish }}
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: refs/tags/${{ inputs.tag }}
+
+      - name: Download verified release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sgblas-${{ inputs.tag }}-release
+          path: ${{ runner.temp }}/sgblas-release
+
+      - name: Reverify assets immediately before publication
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/sgblas-release
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: >-
+          python3 tools/release_package.py verify
+          --release-dir "$OUTPUT_DIR"
+          --tag "$RELEASE_TAG"
+
+      - name: Refuse to replace an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; publish a new version instead." >&2
+            exit 1
+          fi
+
+      - name: Create the GitHub release
+        env:
+          ASSET_DIR: ${{ runner.temp }}/sgblas-release
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" "$ASSET_DIR"/* \
+            --generate-notes \
+            --title "sgBLAS $RELEASE_TAG" \
+            --verify-tag

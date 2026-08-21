@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host:
+    name: Host API and validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Configure
+        run: cmake --preset host-debug
+      - name: Build
+        run: cmake --build --preset host-debug --parallel 2
+      - name: Test
+        run: ctest --preset host-debug --output-on-failure
+      - name: Verify installed C package
+        run: |
+          cmake --install build/host-debug --prefix "$RUNNER_TEMP/sgblas-prefix"
+          cmake -S cmake/install-consumer -B build/install-consumer \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/sgblas-prefix"
+          cmake --build build/install-consumer --parallel 2
+          ./build/install-consumer/sgblas_install_consumer
+
+  cuda-compile:
+    name: CUDA 12.8 / sm80 compile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: nvidia/cuda:12.8.1-devel-ubuntu24.04@sha256:520292dbb4f755fd360766059e62956e9379485d9e073bbd2f6e3c20c270ed66
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends ca-certificates cmake g++ git make
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Configure SM80 release
+        run: >-
+          cmake -S . -B build/cuda-ci
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CUDA_ARCHITECTURES=80
+          -DSGBLAS_ENABLE_CUDA=ON
+          -DSGBLAS_BUILD_TESTS=ON
+          -DSGBLAS_BUILD_BENCHMARKS=ON
+          -DSGBLAS_EXPERIMENTAL_SM80_ASYNC=ON
+          -DSGBLAS_EXPERIMENTAL_SM80_MEDIUM=ON
+          -DSGBLAS_EXPERIMENTAL_SM80_SMALL=ON
+          -DSGBLAS_SM80_MEDIUM_STAGES=2
+          -DSGBLAS_SM80_MEDIUM_L2_PREFETCH_BYTES=0
+          -DSGBLAS_SM80_SMALL_TILE_COLUMNS=32
+          -DSGBLAS_SM80_SMALL_THREAD_ROWS=32
+          -DSGBLAS_SM80_SMALL_MIN_BLOCKS_PER_SM=5
+      - name: Compile library, test, and benchmark binaries
+        run: >-
+          cmake --build build/cuda-ci --parallel 2
+          --target sgblas sgblas_cuda_correctness sgblas_benchmark

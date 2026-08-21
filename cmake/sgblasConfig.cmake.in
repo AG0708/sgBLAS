@@ -1,0 +1,11 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+if(@SGBLAS_CONFIG_NEEDS_CUDATOOLKIT@)
+  find_dependency(CUDAToolkit)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/sgblasTargets.cmake")
+
+check_required_components(sgblas)

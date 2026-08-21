@@ -1,0 +1,69 @@
+{
+  "version": 5,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "host-debug",
+      "displayName": "Host-only debug build",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/host-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SGBLAS_ENABLE_CUDA": "OFF",
+        "SGBLAS_BUILD_TESTS": "ON",
+        "SGBLAS_BUILD_BENCHMARKS": "OFF"
+      }
+    },
+    {
+      "name": "cuda-release",
+      "displayName": "CUDA release build for the native GPU",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/cuda-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CUDA_ARCHITECTURES": "native",
+        "SGBLAS_ENABLE_CUDA": "ON",
+        "SGBLAS_BUILD_TESTS": "ON",
+        "SGBLAS_BUILD_BENCHMARKS": "ON",
+        "SGBLAS_EXPERIMENTAL_SM80_ASYNC": "ON",
+        "SGBLAS_EXPERIMENTAL_SM80_MEDIUM": "ON",
+        "SGBLAS_EXPERIMENTAL_SM80_SMALL": "ON",
+        "SGBLAS_SM80_MEDIUM_STAGES": "2",
+        "SGBLAS_SM80_MEDIUM_L2_PREFETCH_BYTES": "0",
+        "SGBLAS_SM80_SMALL_TILE_COLUMNS": "32",
+        "SGBLAS_SM80_SMALL_THREAD_ROWS": "32",
+        "SGBLAS_SM80_SMALL_MIN_BLOCKS_PER_SM": "5"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "host-debug",
+      "configurePreset": "host-debug"
+    },
+    {
+      "name": "cuda-release",
+      "configurePreset": "cuda-release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "host-debug",
+      "configurePreset": "host-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "cuda-release",
+      "configurePreset": "cuda-release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

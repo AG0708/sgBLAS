@@ -1,0 +1,56 @@
+.DS_Store
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+*.env
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.kdbx
+*.token
+id_rsa*
+id_ed25519*
+.netrc
+.authinfo
+.aws/
+.gcloud/
+credentials*.json
+service-account*.json
+
+# Logs, crash dumps, and local diagnostics
+*.log
+*.trace
+core
+core.*
+*.core
+*.dmp
+
+# CMake and compiler output
+/build*/
+/out/
+CMakeUserPresets.json
+compile_commands.json
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.exe
+
+# CUDA profiling output
+*.ncu-rep
+*.nsys-rep
+*.qdrep
+
+# Generated benchmark artifacts (the curated summary lives under docs/)
+/results/
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.venv/

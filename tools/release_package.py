@@ -219,10 +219,8 @@ def parse_checksum_file(path: Path) -> dict[str, str]:
 
 def scan_sensitive_text(path: Path) -> None:
     if path.stat().st_size > 32 * 1024 * 1024:
-        return
+        raise ReleaseError(f"public evidence file exceeds the 32 MiB scan limit: {path}")
     data = path.read_bytes()
-    if b"\x00" in data[:8192]:
-        return
     for label, pattern in SENSITIVE_PATTERNS:
         if pattern.search(data):
             raise ReleaseError(f"possible {label} in public evidence file: {path}")
@@ -481,6 +479,19 @@ def validate_archive_prefix(path: Path, prefix: str) -> None:
             raise ReleaseError(f"archive member lies outside expected prefix {expected}: {path}")
 
 
+def files_identical(left: Path, right: Path) -> bool:
+    if left.stat().st_size != right.stat().st_size:
+        return False
+    with left.open("rb") as left_stream, right.open("rb") as right_stream:
+        while True:
+            left_chunk = left_stream.read(1024 * 1024)
+            right_chunk = right_stream.read(1024 * 1024)
+            if left_chunk != right_chunk:
+                return False
+            if not left_chunk:
+                return True
+
+
 def verify_evidence_archive(
     path: Path,
     manifest: dict[str, Any],
@@ -609,10 +620,28 @@ def verify_directory(directory: Path, expected_tag: str | None, repo: Path | Non
         resolved, _ = resolve_release_tag(repo, expected_tag, manifest.get("annotated_tag_required") is False)
         if resolved != commit:
             raise ReleaseError(f"local tag commit {resolved} does not match release manifest commit {commit}")
-        with tempfile.TemporaryDirectory(prefix="sgblas-verify-") as temporary:
-            actual_digest = canonical_source_digest(repo, commit, Path(temporary))
-        if actual_digest != source_digest:
-            raise ReleaseError("local tagged source tree does not match release manifest digest")
+        with tempfile.TemporaryDirectory(prefix="sgblas-source-verify-") as temporary:
+            scratch = Path(temporary)
+            actual_digest = canonical_source_digest(repo, commit, scratch)
+            if actual_digest != source_digest:
+                raise ReleaseError("local tagged source tree does not match release manifest digest")
+
+            expected_tar = scratch / "expected-source.tar"
+            expected_archive = scratch / "expected-source.tar.gz"
+            create_git_archive(repo, commit, expected_tar, prefix=f"{stem}/")
+            deterministic_gzip(expected_tar, expected_archive)
+            supplied_archive = directory / kinds["source"]
+            expected_archive_sha256 = sha256_file(expected_archive)
+            supplied_archive_sha256 = sha256_file(supplied_archive)
+            if (
+                expected_archive_sha256 != supplied_archive_sha256
+                or not files_identical(expected_archive, supplied_archive)
+            ):
+                raise ReleaseError(
+                    "source archive does not byte-match deterministic git archive "
+                    f"for {tag} ({commit}); expected SHA-256 "
+                    f"{expected_archive_sha256}, got {supplied_archive_sha256}"
+                )
         with tempfile.TemporaryDirectory(prefix="sgblas-evidence-verify-") as temporary:
             extract_root = Path(temporary)
             with tarfile.open(directory / kinds["evidence"], mode="r:gz") as archive:
@@ -625,10 +654,8 @@ def verify_directory(directory: Path, expected_tag: str | None, repo: Path | Non
 
 
 def verify(args: argparse.Namespace) -> None:
-    repo: Path | None = None
-    if args.tag is not None:
-        repo = repository_root()
-        ensure_clean(repo)
+    repo = repository_root()
+    ensure_clean(repo)
     verify_directory(Path(args.release_dir).expanduser().resolve(), args.tag, repo)
 
 
@@ -674,9 +701,13 @@ def parser() -> argparse.ArgumentParser:
     )
     package_parser.set_defaults(function=package)
 
-    verify_parser = subparsers.add_parser("verify", help="verify checksums, archives, manifests, and optional local tag")
+    verify_parser = subparsers.add_parser(
+        "verify", help="verify checksums, archives, manifests, and the required local tag"
+    )
     verify_parser.add_argument("--release-dir", required=True, help="directory containing the release assets")
-    verify_parser.add_argument("--tag", help="also bind the bundle to this tag in the current repository")
+    verify_parser.add_argument(
+        "--tag", required=True, help="bind the bundle to this tag in the current repository"
+    )
     verify_parser.set_defaults(function=verify)
     return root
 

@@ -72,7 +72,8 @@ release commit.
 The `Release bundle` workflow accepts a same-repository workflow artifact whose
 root is the complete runner directory and contains `manifest.json`. Run it with
 `publish=false`, inspect the resulting assets, and only then rerun with
-`publish=true`. Actions and Syft setup are pinned to immutable revisions; the
+`publish=true`. Actions are pinned to immutable revisions, and the fixed Syft
+version is accepted only after its hard-coded release archive SHA-256 matches; the
 publish job reverifies everything and refuses to replace an existing release.
 
 For evidence acquired outside GitHub Actions, use the local package flow above.
